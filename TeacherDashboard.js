@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, Linking, Alert, Platform } from 'react-native';
 import { database } from './firebaseConfig';
 import { ref, onValue, update, remove } from 'firebase/database';
 import { Video } from 'expo-av';
@@ -21,27 +21,36 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
     });
   }, [pin]);
 
+  // --- CROSS-PLATFORM SESSION CLOSING LOGIC ---
   const handleCloseRoom = () => {
-    Alert.alert(
-      "Tamatkan Sesi?",
-      "Analitik akan dijana untuk rekod anda.",
-      [
-        { text: "Batal", style: "cancel" },
-        { 
-          text: "Tamat", 
-          onPress: () => {
-            const stats = {
-              subject,
-              totalPosts: posts.length,
-              totalVotes: posts.reduce((s, p) => s + p.votes, 0),
-              topQuestion: posts[0] || null
-            };
-            update(ref(database, `rooms/${pin}`), { status: 'Closed' });
-            onSessionEnd(stats);
-          } 
-        }
-      ]
-    );
+    const executeClose = () => {
+      const stats = {
+        subject,
+        totalPosts: posts.length,
+        totalVotes: posts.reduce((s, p) => s + p.votes, 0),
+        topQuestion: posts[0] || null
+      };
+      update(ref(database, `rooms/${pin}`), { status: 'Closed' });
+      onSessionEnd(stats);
+    };
+
+    if (Platform.OS === 'web') {
+      // --- WEB FIX: Avoid Alert UI freezes with a native confirmation dialog box ---
+      const confirmClose = window.confirm("Tamatkan Sesi?\nAnalitik akan dijana untuk rekod anda.");
+      if (confirmClose) {
+        executeClose();
+      }
+    } else {
+      // --- MOBILE: Native Alert structure ---
+      Alert.alert(
+        "Tamatkan Sesi?",
+        "Analitik akan dijana untuk rekod anda.",
+        [
+          { text: "Batal", style: "cancel" },
+          { text: "Tamat", onPress: executeClose }
+        ]
+      );
+    }
   };
 
   return (

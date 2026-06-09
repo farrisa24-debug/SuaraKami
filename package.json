@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
 "predeploy": "npx expo export --platform web",
-  "deploy": "gh-pages -d dist"
+  "deploy": "gh-pages --nojekyll -d dist"
   },
   "dependencies": {
     "cloudinary": "^2.10.0",

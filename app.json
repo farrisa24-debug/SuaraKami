@@ -24,8 +24,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-"bundler": "metro",
-  "baseUrl": "/SuaraKami"
+"bundler": "metro"
+    },
+"experiments": {
+      "baseUrl": "/SuaraKami"
     }
   }
 }
