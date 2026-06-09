@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Image, ActivityIndicator, Platform } from 'react-native';
 import { database } from './firebaseConfig';
-import { ref, push, onValue, update, increment, set, onDisconnect } from 'firebase/database';
+import { ref, push, onValue, update, increment, set } from 'firebase/database';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -10,22 +10,18 @@ const FeedScreen = ({ pin, onBack }) => {
   const [posts, setPosts] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [myVotes, setMyVotes] = useState({}); 
-  const [studentId] = useState(() => 'student_' + Math.random().toString(36).substring(2, 11)); // Generates a random temp anonymous ID
+  // Generates a temporary random anonymous ID per session to safely track student counts
+  const [studentId] = useState(() => 'student_' + Math.random().toString(36).substring(2, 11));
 
-  // --- 1. NEW: REGISTER UNIQUE ANONYMOUS STUDENT PRESENCE ---
+  // --- 1. REGISTER UNIQUE ANONYMOUS STUDENT PRESENCE ---
   useEffect(() => {
     const studentPresenceRef = ref(database, `rooms/${pin}/students/${studentId}`);
     
-    // Set this student as "active" in the database
+    // Set this specific device node as true/active in Firebase
     set(studentPresenceRef, true);
 
-    // Clean up if they leave or close the browser tab unexpectedly
-    if (Platform.OS !== 'web') {
-      onDisconnect(studentPresenceRef).remove();
-    }
-
     return () => {
-      // Clean up when they exit gracefully using the "Keluar" button
+      // Clean up when student exits gracefully using 'Keluar' button
       set(studentPresenceRef, null);
     };
   }, [pin, studentId]);
@@ -37,7 +33,7 @@ const FeedScreen = ({ pin, onBack }) => {
       const data = snapshot.val();
       if (data) {
         const postList = Object.keys(data).map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.votes - a.votes);
+          .sort((a, b) => b.votes - a.votes); // Dynamically forces high upvoted posts to bubbles top
         setPosts(postList);
       } else {
         setPosts([]);
@@ -50,13 +46,16 @@ const FeedScreen = ({ pin, onBack }) => {
     const statusRef = ref(database, `rooms/${pin}/status`);
     return onValue(statusRef, (snapshot) => {
       const status = snapshot.val();
+      console.log("Status Bilik Terkini:", status);
+
+      // Safe check: lowercase match shields against casing mismatches ('Closed' vs 'closed')
       if (status && status.toLowerCase() === 'closed') {
         if (Platform.OS === 'web') {
           window.alert("Sesi Tamat: Guru telah menamatkan sesi kelas ini.");
         } else {
           Alert.alert("Sesi Tamat", "Guru telah menamatkan sesi kelas ini.");
         }
-        onBack(); 
+        onBack(); // Safely bumps student out to core main landing menu
       }
     });
   }, [pin, onBack]);
@@ -111,6 +110,7 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
+  // --- 5. FILE SELECTION ACTION CONTROLLERS ---
   const handlePickMedia = async (mediaType) => {
     let result;
     if (mediaType === 'file') {
@@ -145,6 +145,7 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
+  // --- 6. SPAM DEFIANT DOUBLE-VOTE CONSTRAINT CONTROL ---
   const handleVote = (postId) => {
     const currentVotesForPost = myVotes[postId] || 0;
 
@@ -173,15 +174,23 @@ const FeedScreen = ({ pin, onBack }) => {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={onBack}><Text style={styles.backBtn}>← Keluar</Text></TouchableOpacity>
-      <Text style={styles.header}>Bilik PIN: {pin}</Text>
+      {/* Navigation Headers */}
+      <View style={styles.headerLayout}>
+        <TouchableOpacity onPress={onBack}><Text style={styles.backBtn}>← Keluar</Text></TouchableOpacity>
+        <Text style={styles.headerTitle}>Bilik PIN: {pin}</Text>
+      </View>
       
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <View style={styles.postBubble}>
-            {item.type === 'image' && <Image source={{ uri: item.content }} style={styles.mediaPreview} />}
+            {item.type === 'image' && (
+              <View style={styles.mediaContainer}>
+                <Image source={{ uri: item.content }} style={styles.mediaPreview} />
+              </View>
+            )}
             {item.type === 'video' && <Text style={styles.mediaLabel}>📹 Video Clip Sedia Di Dashboard Pendidik</Text>}
             {item.type === 'file' && <Text style={styles.mediaLabel}>📄 Dokumen PDF Sedia Di Dashboard Pendidik</Text>}
             
@@ -202,33 +211,70 @@ const FeedScreen = ({ pin, onBack }) => {
 
       {uploading && <ActivityIndicator size="large" color="#3498DB" style={{marginBottom: 10}} />}
 
-      <View style={styles.inputBar}>
-        <TouchableOpacity onPress={() => handlePickMedia('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => handlePickMedia('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => handlePickMedia('file')}><Text style={styles.icon}>📂</Text></TouchableOpacity>
-        <TextInput style={styles.input} placeholder="Tanya sesuatu secara rawak (anonymously)..." value={message} onChangeText={setMessage} />
-        <TouchableOpacity onPress={handleSendText}><Text style={styles.sendIcon}>▶️</Text></TouchableOpacity>
+      {/* Footer Interactive Actions Tray */}
+      <View style={styles.inputContainerWrapper}>
+        <View style={styles.inputBar}>
+          <TouchableOpacity onPress={() => handlePickMedia('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => handlePickMedia('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => handlePickMedia('file')}><Text style={styles.icon}>📂</Text></TouchableOpacity>
+          <TextInput style={styles.input} placeholder="Tanya sesuatu secara rawak (anonymously)..." value={message} onChangeText={setMessage} />
+          <TouchableOpacity onPress={handleSendText}><Text style={styles.sendIcon}>▶️</Text></TouchableOpacity>
+        </View>
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F4F7F6', padding: 20, paddingTop: 50 },
-  header: { fontSize: 18, fontWeight: 'bold', color: '#3498DB', marginBottom: 10 },
-  backBtn: { color: '#3498DB', marginBottom: 10, fontWeight: 'bold' },
-  postBubble: { backgroundColor: '#FFF', padding: 15, borderRadius: 15, marginBottom: 15, elevation: 3 },
-  mediaPreview: { width: '100%', height: 200, borderRadius: 10, marginBottom: 10 },
+  container: { flex: 1, backgroundColor: '#F4F7F6', paddingHorizontal: 15, paddingTop: 50 },
+  headerLayout: { alignSelf: 'center', width: '100%', maxWidth: 600, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3498DB' },
+  backBtn: { color: '#3498DB', fontWeight: 'bold', fontSize: 15 },
+  listContent: { paddingBottom: 100 },
+  
+  // FIXED COMPACT BUBBLE CARD FOR LAPTOPS
+  postBubble: { 
+    backgroundColor: '#FFF', 
+    padding: 15, 
+    borderRadius: 15, 
+    marginBottom: 15, 
+    elevation: 3,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 600 
+  },
+  
+  // FIXED ASPECTS MEDIA WRAPPERS
+  mediaContainer: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#1E1E1E', 
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  mediaPreview: { 
+    width: '100%', 
+    height: '100%', 
+    ...Platform.select({
+      web: { objectFit: 'contain' },
+      default: { resizeMode: 'contain' }
+    })
+  },
+  
   mediaLabel: { color: '#3498DB', fontWeight: 'bold', fontSize: 12, marginBottom: 5 },
-  postText: { fontSize: 16, color: '#333', marginTop: 5 },
-  voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 100 },
+  postText: { fontSize: 16, color: '#333', marginTop: 5, lineHeight: 22 },
+  voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 110 },
   voteDisabled: { backgroundColor: '#EEE' },
-  voteText: { color: '#1976D2', fontWeight: 'bold', fontSize: 13 },
+  voteText: { color: '#1976D2', fontWeight: 'bold', fontSize: 12 },
   voteSubText: { fontSize: 9, color: '#999' },
-  inputBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 30, padding: 10, elevation: 10 },
+  
+  // ALIGNED ACTION DRAWER
+  inputContainerWrapper: { width: '100%', alignItems: 'center', position: 'absolute', bottom: 20, left: 0, right: 0, paddingHorizontal: 15 },
+  inputBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 30, padding: 10, elevation: 10, width: '100%', maxWidth: 600 },
   input: { flex: 1, height: 40, paddingHorizontal: 10 },
-  icon: { fontSize: 22, marginHorizontal: 5 },
-  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10 }
+  icon: { fontSize: 22, marginHorizontal: 5, cursor: 'pointer' },
+  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10, cursor: 'pointer' }
 });
 
 export default FeedScreen;
