@@ -4,7 +4,7 @@ import { database } from './firebaseConfig';
 import { ref, push, onValue, update, increment, set } from 'firebase/database';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { Video } from 'expo-av'; // Added Video Import for Student Feed View
+import { Video } from 'expo-av'; 
 
 const FeedScreen = ({ pin, onBack }) => {
   const [message, setMessage] = useState('');
@@ -179,21 +179,23 @@ const FeedScreen = ({ pin, onBack }) => {
         renderItem={({ item }) => (
           <View style={styles.postBubble}>
             
-            {/* Render Image Attachments safely */}
+            {/* Image Render */}
             {item.type === 'image' && (
               <View style={styles.mediaContainer}>
                 <Image source={{ uri: item.content }} style={styles.mediaPreview} />
               </View>
             )}
 
-            {/* UPGRADED: Render Live Video Streams directly inside the Student Feed */}
+            {/* FIXED & AUTO-RESIZED VIDEO ENGINE */}
             {item.type === 'video' && (
               <View style={styles.mediaContainer}>
                 <Video 
                   source={{ uri: item.content }} 
-                  style={styles.mediaPreview} 
+                  style={styles.videoPreview} 
                   useNativeControls 
-                  resizeMode="contain" 
+                  resizeMode="contain" // Forces the video player to letterbox cleanly inside instead of stretching
+                  shouldPlay={false}
+                  isMuted={false}
                 />
               </View>
             )}
@@ -246,13 +248,18 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 600 
   },
+  
+  // Outer structural constraint box
   mediaContainer: {
     width: '100%',
     height: 300,
-    backgroundColor: '#1E1E1E', 
+    backgroundColor: '#000000', // Deep pure black backdrop provides flawless cinematic letterboxing framing
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 10,
+    position: 'relative', // Vital anchor point for web layouts
+    justifyContent: 'center',
+    alignItems: 'center'
   },
   mediaPreview: { 
     width: '100%', 
@@ -262,6 +269,18 @@ const styles = StyleSheet.create({
       default: { resizeMode: 'contain' }
     })
   },
+  
+  // FIXED: Absolute proportional layout assignment stops desktop video canvas spilling
+  videoPreview: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    right: 0,
+    width: '100%',
+    height: '100%',
+  },
+
   mediaLabel: { color: '#3498DB', fontWeight: 'bold', fontSize: 12, marginBottom: 5 },
   postText: { fontSize: 16, color: '#333', marginTop: 5, lineHeight: 22 },
   voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 110 },
