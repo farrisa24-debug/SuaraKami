@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Image, ActivityIndicator, Platform } from 'react-native';
 import { database } from './firebaseConfig';
-import { ref, push, onValue, update, increment } from 'firebase/database';
+import { ref, push, onValue, update, increment, set, onDisconnect } from 'firebase/database';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -9,16 +9,35 @@ const FeedScreen = ({ pin, onBack }) => {
   const [message, setMessage] = useState('');
   const [posts, setPosts] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [myVotes, setMyVotes] = useState({}); // Tracks student votes per post: { postId: voteCount }
+  const [myVotes, setMyVotes] = useState({}); 
+  const [studentId] = useState(() => 'student_' + Math.random().toString(36).substring(2, 11)); // Generates a random temp anonymous ID
 
-  // --- 1. LIVE POSTS LISTENER & DYNAMIC SORTING ---
+  // --- 1. NEW: REGISTER UNIQUE ANONYMOUS STUDENT PRESENCE ---
+  useEffect(() => {
+    const studentPresenceRef = ref(database, `rooms/${pin}/students/${studentId}`);
+    
+    // Set this student as "active" in the database
+    set(studentPresenceRef, true);
+
+    // Clean up if they leave or close the browser tab unexpectedly
+    if (Platform.OS !== 'web') {
+      onDisconnect(studentPresenceRef).remove();
+    }
+
+    return () => {
+      // Clean up when they exit gracefully using the "Keluar" button
+      set(studentPresenceRef, null);
+    };
+  }, [pin, studentId]);
+
+  // --- 2. LIVE POSTS LISTENER & DYNAMIC SORTING ---
   useEffect(() => {
     const postsRef = ref(database, `rooms/${pin}/posts`);
     return onValue(postsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const postList = Object.keys(data).map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.votes - a.votes); // Automatically bubbles highest-voted questions to the top
+          .sort((a, b) => b.votes - a.votes);
         setPosts(postList);
       } else {
         setPosts([]);
@@ -26,26 +45,23 @@ const FeedScreen = ({ pin, onBack }) => {
     });
   }, [pin]);
 
-  // --- 2. REINFORCED LIVE SESSION TERMINATION LISTENER (INSTANT KICK-OUT) ---
+  // --- 3. LIVE SESSION TERMINATION LISTENER (INSTANT KICK-OUT) ---
   useEffect(() => {
     const statusRef = ref(database, `rooms/${pin}/status`);
     return onValue(statusRef, (snapshot) => {
       const status = snapshot.val();
-      console.log("Status Bilik Terkini:", status); // Helps you verify the live data flow in the Inspect Console
-
-      // Safe check: Convert to lowercase to prevent capitalization mismatches ('Closed' vs 'closed')
       if (status && status.toLowerCase() === 'closed') {
         if (Platform.OS === 'web') {
           window.alert("Sesi Tamat: Guru telah menamatkan sesi kelas ini.");
         } else {
           Alert.alert("Sesi Tamat", "Guru telah menamatkan sesi kelas ini.");
         }
-        onBack(); // Safely pops the student out back to the landing main menu
+        onBack(); 
       }
     });
   }, [pin, onBack]);
 
-  // --- 3. CROSS-PLATFORM CLOUDINARY UPLOAD LOGIC ---
+  // --- 4. CROSS-PLATFORM CLOUDINARY UPLOAD LOGIC ---
   const uploadToCloudinary = async (fileUri, fileType) => {
     setUploading(true);
     const cloudName = "dcnpa6whw"; 
@@ -54,7 +70,6 @@ const FeedScreen = ({ pin, onBack }) => {
     const data = new FormData();
 
     if (Platform.OS === 'web') {
-      // --- WEB WORKFLOW: Convert browser blob URL to raw binary blob ---
       try {
         const response = await fetch(fileUri);
         const blob = await response.blob();
@@ -65,7 +80,6 @@ const FeedScreen = ({ pin, onBack }) => {
         return null;
       }
     } else {
-      // --- NATIVE MOBILE WORKFLOW: Format using local device file paths ---
       const cleanUri = Platform.OS === 'android' ? fileUri : fileUri.replace('file://', '');
       const extension = fileUri.split('.').pop();
 
@@ -85,7 +99,7 @@ const FeedScreen = ({ pin, onBack }) => {
       });
       const result = await response.json();
       setUploading(false);
-      return result.secure_url; // Returns the secure hosted media cloud link
+      return result.secure_url; 
     } catch (error) {
       setUploading(false);
       if (Platform.OS === 'web') {
@@ -97,7 +111,6 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- 4. DEVICE MEDIA FILE PICKER SELECTOR ---
   const handlePickMedia = async (mediaType) => {
     let result;
     if (mediaType === 'file') {
@@ -124,7 +137,7 @@ const FeedScreen = ({ pin, onBack }) => {
         push(ref(database, `rooms/${pin}/posts`), {
           type: mediaType,
           content: downloadUrl,
-          text: `Lampiran ${mediaType.toUpperCase()}`, // Safe metadata fallback label for reporting/analytics modules
+          text: `Lampiran ${mediaType.toUpperCase()}`, 
           votes: 0,
           timestamp: Date.now()
         });
@@ -132,7 +145,6 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- 5. DOUBLE VOTE LIMIT SPAM CONTROL ALGORITHM ---
   const handleVote = (postId) => {
     const currentVotesForPost = myVotes[postId] || 0;
 
@@ -148,7 +160,6 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- 6. PLAIN TEXT QUESTION SUBMISSION ---
   const handleSendText = () => {
     if (message.trim() === '') return;
     push(ref(database, `rooms/${pin}/posts`), {
@@ -162,11 +173,9 @@ const FeedScreen = ({ pin, onBack }) => {
 
   return (
     <View style={styles.container}>
-      {/* Upper Navigation Row */}
       <TouchableOpacity onPress={onBack}><Text style={styles.backBtn}>← Keluar</Text></TouchableOpacity>
       <Text style={styles.header}>Bilik PIN: {pin}</Text>
       
-      {/* Live Streams Scroll Container */}
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id}
@@ -178,7 +187,6 @@ const FeedScreen = ({ pin, onBack }) => {
             
             <Text style={styles.postText}>{item.type === 'text' ? item.content : item.text}</Text>
             
-            {/* Interactive Crowdsourced Voting Button */}
             <TouchableOpacity 
               style={[styles.voteBtn, (myVotes[item.id] >= 2) && styles.voteDisabled]} 
               onPress={() => handleVote(item.id)}
@@ -192,10 +200,8 @@ const FeedScreen = ({ pin, onBack }) => {
         )}
       />
 
-      {/* Cloud Transaction Status Display */}
       {uploading && <ActivityIndicator size="large" color="#3498DB" style={{marginBottom: 10}} />}
 
-      {/* Persistent Bottom Action/Input Tray */}
       <View style={styles.inputBar}>
         <TouchableOpacity onPress={() => handlePickMedia('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => handlePickMedia('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
@@ -207,7 +213,6 @@ const FeedScreen = ({ pin, onBack }) => {
   );
 };
 
-// --- STYLESHEET MODULE OBJECTS ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F4F7F6', padding: 20, paddingTop: 50 },
   header: { fontSize: 18, fontWeight: 'bold', color: '#3498DB', marginBottom: 10 },
