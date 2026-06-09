@@ -103,23 +103,42 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- 5. FILE SELECTION ACTION CONTROLLERS ---
-  const handlePickMedia = async (mediaType) => {
+  // --- 5. FIXED: CAMERA AND FILE PICKER LOGIC MATRIX ---
+  const handlePickMedia = async (mediaType, sourceAction) => {
     let result;
+
     if (mediaType === 'file') {
       result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
     } else {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        if (Platform.OS === 'web') window.alert("Izin galeri diperlukan.");
-        else Alert.alert("Akses Ditolak", "Izin galeri diperlukan.");
-        return;
-      }
+      // Check and request permissions depending on choice
+      if (sourceAction === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          if (Platform.OS === 'web') window.alert("Izin kamera diperlukan.");
+          else Alert.alert("Akses Ditolak", "Izin kamera diperlukan.");
+          return;
+        }
+        
+        // Launch live hardware camera snapshot/recording
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
+          quality: 0.4,
+        });
+      } else {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          if (Platform.OS === 'web') window.alert("Izin galeri diperlukan.");
+          else Alert.alert("Akses Ditolak", "Izin galeri diperlukan.");
+          return;
+        }
 
-      result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
-        quality: 0.4,
-      });
+        // Launch static media storage file picker selector
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
+          quality: 0.4,
+          allowsEditing: true,
+        });
+      }
     }
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -135,6 +154,30 @@ const FeedScreen = ({ pin, onBack }) => {
           timestamp: Date.now()
         });
       }
+    }
+  };
+
+  // --- INTERACTIVE ACTION PROMPT CHOICE ---
+  const triggerMediaPrompt = (mediaType) => {
+    if (Platform.OS === 'web') {
+      // Web browser prompt framework workaround
+      const choice = window.confirm("Klik 'OK' untuk Tangkap Terus Guna Kamera.\nKlik 'Cancel' untuk Pilih Fail sedia ada.");
+      if (choice) {
+        handlePickMedia(mediaType, 'camera');
+      } else {
+        handlePickMedia(mediaType, 'library');
+      }
+    } else {
+      // Mobile native alert choices menu sheet
+      Alert.alert(
+        "Muat Naik Lampiran",
+        "Sila pilih kaedah input:",
+        [
+          { text: "Ambil Gambar / Rakam Video", onPress: () => handlePickMedia(mediaType, 'camera') },
+          { text: "Pilih Fail / Galeri", onPress: () => handlePickMedia(mediaType, 'library') },
+          { text: "Batal", style: "cancel" }
+        ]
+      );
     }
   };
 
@@ -179,23 +222,20 @@ const FeedScreen = ({ pin, onBack }) => {
         renderItem={({ item }) => (
           <View style={styles.postBubble}>
             
-            {/* Image Render */}
             {item.type === 'image' && (
               <View style={styles.mediaContainer}>
                 <Image source={{ uri: item.content }} style={styles.mediaPreview} />
               </View>
             )}
 
-            {/* FIXED & AUTO-RESIZED VIDEO ENGINE */}
             {item.type === 'video' && (
               <View style={styles.mediaContainer}>
                 <Video 
                   source={{ uri: item.content }} 
                   style={styles.videoPreview} 
                   useNativeControls 
-                  resizeMode="contain" // Forces the video player to letterbox cleanly inside instead of stretching
+                  resizeMode="contain" 
                   shouldPlay={false}
-                  isMuted={false}
                 />
               </View>
             )}
@@ -221,9 +261,10 @@ const FeedScreen = ({ pin, onBack }) => {
 
       <View style={styles.inputContainerWrapper}>
         <View style={styles.inputBar}>
-          <TouchableOpacity onPress={() => handlePickMedia('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => handlePickMedia('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => handlePickMedia('file')}><Text style={styles.icon}>📂</Text></TouchableOpacity>
+          {/* Triggers the interactive choosing prompt menu */}
+          <TouchableOpacity onPress={() => triggerMediaPrompt('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => triggerMediaPrompt('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => handlePickMedia('file', 'document')}><Text style={styles.icon}>📂</Text></TouchableOpacity>
           <TextInput style={styles.input} placeholder="Tanya sesuatu secara rawak (anonymously)..." value={message} onChangeText={setMessage} />
           <TouchableOpacity onPress={handleSendText}><Text style={styles.sendIcon}>▶️</Text></TouchableOpacity>
         </View>
@@ -248,16 +289,14 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 600 
   },
-  
-  // Outer structural constraint box
   mediaContainer: {
     width: '100%',
     height: 300,
-    backgroundColor: '#000000', // Deep pure black backdrop provides flawless cinematic letterboxing framing
+    backgroundColor: '#000000', 
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 10,
-    position: 'relative', // Vital anchor point for web layouts
+    position: 'relative', 
     justifyContent: 'center',
     alignItems: 'center'
   },
@@ -269,18 +308,11 @@ const styles = StyleSheet.create({
       default: { resizeMode: 'contain' }
     })
   },
-  
-  // FIXED: Absolute proportional layout assignment stops desktop video canvas spilling
   videoPreview: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    right: 0,
-    width: '100%',
-    height: '100%',
+    top: 0, left: 0, bottom: 0, right: 0,
+    width: '100%', height: '100%',
   },
-
   mediaLabel: { color: '#3498DB', fontWeight: 'bold', fontSize: 12, marginBottom: 5 },
   postText: { fontSize: 16, color: '#333', marginTop: 5, lineHeight: 22 },
   voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 110 },
