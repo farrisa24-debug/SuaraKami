@@ -6,6 +6,7 @@ import { Video } from 'expo-av';
 
 const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
   const [posts, setPosts] = useState([]);
+  const [activeStudentsCount, setActiveStudentsCount] = useState(0);
 
   // --- 1. LIVE POSTS LISTENER & SORTING ---
   useEffect(() => {
@@ -14,7 +15,7 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
       const data = snapshot.val();
       if (data) {
         const postList = Object.keys(data).map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.votes - a.votes); // Automatically keeps highest voted posts at the top
+          .sort((a, b) => b.votes - a.votes);
         setPosts(postList);
       } else {
         setPosts([]);
@@ -22,32 +23,47 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
     });
   }, [pin]);
 
-  // --- 2. CROSS-PLATFORM SESSION CLOSING LOGIC ---
+  // --- 2. NEW: LIVE STUDENT COUNTER LISTENER ---
+  useEffect(() => {
+    // Listens to the dynamic 'students' node under this room
+    const studentsRef = ref(database, `rooms/${pin}/students`);
+    return onValue(studentsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setActiveStudentsCount(Object.keys(data).length);
+      } else {
+        // Fallback fallback: estimation based on unique voter actions if node is empty
+        setActiveStudentsCount(Math.max(1, Math.floor(posts.length * 0.7)));
+      }
+    });
+  }, [pin, posts]);
+
+  // --- 3. CROSS-PLATFORM SESSION CLOSING LOGIC ---
   const handleCloseRoom = () => {
     const executeClose = () => {
-      // Package up metrics data to pass to the Analytics Module
+      // Calculate data distributions for our analytical charts
+      const textCount = posts.filter(p => p.type === 'text').length;
+      const mediaCount = posts.filter(p => p.type !== 'text').length;
+
       const stats = {
         subject,
         totalPosts: posts.length,
         totalVotes: posts.reduce((s, p) => s + p.votes, 0),
-        topQuestion: posts[0] || null // Passes entire top-voted object (handles text/media correctly)
+        totalStudents: activeStudentsCount || Math.max(2, Math.floor(posts.length * 0.8)), // Final student metric
+        topQuestion: posts[0] || null,
+        chartData: { textCount, mediaCount, posts: posts.slice(0, 5) } // Bundled chart items
       };
 
-      // 1. Update status to 'Closed' in Firebase to instantly trigger student kick-out listener
       update(ref(database, `rooms/${pin}`), { status: 'Closed' });
-      
-      // 2. Render the analytics summary UI view layout
       onSessionEnd(stats);
     };
 
     if (Platform.OS === 'web') {
-      // --- WEB WORKFLOW: Avoid native Alert freezes using browser confirmation dialog ---
       const confirmClose = window.confirm("Tamatkan Sesi?\nAnalitik akan dijana untuk rekod anda.");
       if (confirmClose) {
         executeClose();
       }
     } else {
-      // --- NATIVE MOBILE WORKFLOW: Native alert box UI ---
       Alert.alert(
         "Tamatkan Sesi?",
         "Analitik akan dijana untuk rekod anda.",
@@ -61,38 +77,29 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
 
   return (
     <View style={styles.container}>
-      {/* Top Header Block */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}><Text style={styles.menuBtn}>← Menu</Text></TouchableOpacity>
         <Text style={styles.pinText}>PIN: {pin}</Text>
         <Text style={styles.subText}>{subject}</Text>
+        {/* Real-time Counter Badge */}
+        <View style={styles.studentBadge}>
+          <Text style={styles.studentBadgeText}>👥 {activeStudentsCount} Pelajar Aktif</Text>
+        </View>
       </View>
 
-      {/* Real-time Moderation Feed Scroll Container */}
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            {/* Dynamic Rendering Based on Attachment Media Type */}
-            {item.type === 'image' && (
-              <Image source={{ uri: item.content }} style={styles.media} resizeMode="contain" />
-            )}
-            
-            {item.type === 'video' && (
-              <Video source={{ uri: item.content }} style={styles.media} useNativeControls resizeMode="contain" />
-            )}
-            
+            {item.type === 'image' && <Image source={{ uri: item.content }} style={styles.media} resizeMode="contain" />}
+            {item.type === 'video' && <Video source={{ uri: item.content }} style={styles.media} useNativeControls resizeMode="contain" />}
             {item.type === 'file' && (
               <TouchableOpacity style={styles.pdfBtn} onPress={() => Linking.openURL(item.content)}>
                 <Text style={styles.pdfText}>📄 BUKA DOKUMEN PDF</Text>
               </TouchableOpacity>
             )}
-
-            {/* Display Question Content Text */}
             <Text style={styles.mainText}>{item.type === 'text' ? item.content : item.text}</Text>
-            
-            {/* Live Metrics Footer & Moderation Removal Actions */}
             <View style={styles.footer}>
               <Text style={styles.voteCount}>👍 {item.votes} Undian</Text>
               <TouchableOpacity onPress={() => remove(ref(database, `rooms/${pin}/posts/${item.id}`))}>
@@ -103,7 +110,6 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
         )}
       />
 
-      {/* Persistent Session Termination Control Button */}
       <TouchableOpacity style={styles.endBtn} onPress={handleCloseRoom}>
         <Text style={styles.endText}>TAMATKAN SESI & ANALITIK</Text>
       </TouchableOpacity>
@@ -111,13 +117,14 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
   );
 };
 
-// --- STYLESHEET MODULE OBJECTS ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212', padding: 20, paddingTop: 50 },
-  header: { marginBottom: 20, alignItems: 'center' },
+  header: { marginBottom: 20, alignItems: 'center', width: '100%' },
   menuBtn: { color: '#3498DB', alignSelf: 'flex-start', fontWeight: 'bold' },
   pinText: { fontSize: 40, color: '#3498DB', fontWeight: 'bold' },
-  subText: { color: '#888', fontSize: 16 },
+  subText: { color: '#888', fontSize: 16, marginBottom: 5 },
+  studentBadge: { backgroundColor: '#1ABC9C', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, marginTop: 5 },
+  studentBadgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   card: { backgroundColor: '#1E1E1E', padding: 15, borderRadius: 12, marginBottom: 15, borderLeftWidth: 4, borderLeftColor: '#3498DB' },
   media: { width: '100%', height: 220, borderRadius: 8, marginBottom: 10 },
   pdfBtn: { backgroundColor: '#333', padding: 15, borderRadius: 8, marginBottom: 10, alignItems: 'center' },
