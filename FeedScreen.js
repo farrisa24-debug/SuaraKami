@@ -4,24 +4,20 @@ import { database } from './firebaseConfig';
 import { ref, push, onValue, update, increment, set } from 'firebase/database';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { Video } from 'expo-av'; // Added Video Import for Student Feed View
 
 const FeedScreen = ({ pin, onBack }) => {
   const [message, setMessage] = useState('');
   const [posts, setPosts] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [myVotes, setMyVotes] = useState({}); 
-  // Generates a temporary random anonymous ID per session to safely track student counts
   const [studentId] = useState(() => 'student_' + Math.random().toString(36).substring(2, 11));
 
   // --- 1. REGISTER UNIQUE ANONYMOUS STUDENT PRESENCE ---
   useEffect(() => {
     const studentPresenceRef = ref(database, `rooms/${pin}/students/${studentId}`);
-    
-    // Set this specific device node as true/active in Firebase
     set(studentPresenceRef, true);
-
     return () => {
-      // Clean up when student exits gracefully using 'Keluar' button
       set(studentPresenceRef, null);
     };
   }, [pin, studentId]);
@@ -33,7 +29,7 @@ const FeedScreen = ({ pin, onBack }) => {
       const data = snapshot.val();
       if (data) {
         const postList = Object.keys(data).map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.votes - a.votes); // Dynamically forces high upvoted posts to bubbles top
+          .sort((a, b) => b.votes - a.votes);
         setPosts(postList);
       } else {
         setPosts([]);
@@ -46,16 +42,13 @@ const FeedScreen = ({ pin, onBack }) => {
     const statusRef = ref(database, `rooms/${pin}/status`);
     return onValue(statusRef, (snapshot) => {
       const status = snapshot.val();
-      console.log("Status Bilik Terkini:", status);
-
-      // Safe check: lowercase match shields against casing mismatches ('Closed' vs 'closed')
       if (status && status.toLowerCase() === 'closed') {
         if (Platform.OS === 'web') {
           window.alert("Sesi Tamat: Guru telah menamatkan sesi kelas ini.");
         } else {
           Alert.alert("Sesi Tamat", "Guru telah menamatkan sesi kelas ini.");
         }
-        onBack(); // Safely bumps student out to core main landing menu
+        onBack(); 
       }
     });
   }, [pin, onBack]);
@@ -174,7 +167,6 @@ const FeedScreen = ({ pin, onBack }) => {
 
   return (
     <View style={styles.container}>
-      {/* Navigation Headers */}
       <View style={styles.headerLayout}>
         <TouchableOpacity onPress={onBack}><Text style={styles.backBtn}>← Keluar</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>Bilik PIN: {pin}</Text>
@@ -186,12 +178,26 @@ const FeedScreen = ({ pin, onBack }) => {
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <View style={styles.postBubble}>
+            
+            {/* Render Image Attachments safely */}
             {item.type === 'image' && (
               <View style={styles.mediaContainer}>
                 <Image source={{ uri: item.content }} style={styles.mediaPreview} />
               </View>
             )}
-            {item.type === 'video' && <Text style={styles.mediaLabel}>📹 Video Clip Sedia Di Dashboard Pendidik</Text>}
+
+            {/* UPGRADED: Render Live Video Streams directly inside the Student Feed */}
+            {item.type === 'video' && (
+              <View style={styles.mediaContainer}>
+                <Video 
+                  source={{ uri: item.content }} 
+                  style={styles.mediaPreview} 
+                  useNativeControls 
+                  resizeMode="contain" 
+                />
+              </View>
+            )}
+
             {item.type === 'file' && <Text style={styles.mediaLabel}>📄 Dokumen PDF Sedia Di Dashboard Pendidik</Text>}
             
             <Text style={styles.postText}>{item.type === 'text' ? item.content : item.text}</Text>
@@ -211,7 +217,6 @@ const FeedScreen = ({ pin, onBack }) => {
 
       {uploading && <ActivityIndicator size="large" color="#3498DB" style={{marginBottom: 10}} />}
 
-      {/* Footer Interactive Actions Tray */}
       <View style={styles.inputContainerWrapper}>
         <View style={styles.inputBar}>
           <TouchableOpacity onPress={() => handlePickMedia('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
@@ -231,8 +236,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3498DB' },
   backBtn: { color: '#3498DB', fontWeight: 'bold', fontSize: 15 },
   listContent: { paddingBottom: 100 },
-  
-  // FIXED COMPACT BUBBLE CARD FOR LAPTOPS
   postBubble: { 
     backgroundColor: '#FFF', 
     padding: 15, 
@@ -243,8 +246,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 600 
   },
-  
-  // FIXED ASPECTS MEDIA WRAPPERS
   mediaContainer: {
     width: '100%',
     height: 300,
@@ -261,20 +262,17 @@ const styles = StyleSheet.create({
       default: { resizeMode: 'contain' }
     })
   },
-  
   mediaLabel: { color: '#3498DB', fontWeight: 'bold', fontSize: 12, marginBottom: 5 },
   postText: { fontSize: 16, color: '#333', marginTop: 5, lineHeight: 22 },
   voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 110 },
   voteDisabled: { backgroundColor: '#EEE' },
   voteText: { color: '#1976D2', fontWeight: 'bold', fontSize: 12 },
   voteSubText: { fontSize: 9, color: '#999' },
-  
-  // ALIGNED ACTION DRAWER
   inputContainerWrapper: { width: '100%', alignItems: 'center', position: 'absolute', bottom: 20, left: 0, right: 0, paddingHorizontal: 15 },
   inputBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 30, padding: 10, elevation: 10, width: '100%', maxWidth: 600 },
   input: { flex: 1, height: 40, paddingHorizontal: 10 },
-  icon: { fontSize: 22, marginHorizontal: 5, cursor: 'pointer' },
-  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10, cursor: 'pointer' }
+  icon: { fontSize: 22, marginHorizontal: 5 },
+  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10 }
 });
 
 export default FeedScreen;
