@@ -26,12 +26,15 @@ const FeedScreen = ({ pin, onBack }) => {
     });
   }, [pin]);
 
-  // --- 2. LIVE SESSION TERMINATION LISTENER (INSTANT KICK-OUT) ---
+  // --- 2. REINFORCED LIVE SESSION TERMINATION LISTENER (INSTANT KICK-OUT) ---
   useEffect(() => {
     const statusRef = ref(database, `rooms/${pin}/status`);
     return onValue(statusRef, (snapshot) => {
       const status = snapshot.val();
-      if (status === 'Closed') {
+      console.log("Status Bilik Terkini:", status); // Helps you verify the live data flow in the Inspect Console
+
+      // Safe check: Convert to lowercase to prevent capitalization mismatches ('Closed' vs 'closed')
+      if (status && status.toLowerCase() === 'closed') {
         if (Platform.OS === 'web') {
           window.alert("Sesi Tamat: Guru telah menamatkan sesi kelas ini.");
         } else {
