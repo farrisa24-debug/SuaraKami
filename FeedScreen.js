@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Image, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Image, ActivityIndicator, Platform, Modal } from 'react-native';
 import { database } from './firebaseConfig';
 import { ref, push, onValue, update, increment, set } from 'firebase/database';
 import * as ImagePicker from 'expo-image-picker';
@@ -12,6 +12,9 @@ const FeedScreen = ({ pin, onBack }) => {
   const [uploading, setUploading] = useState(false);
   const [myVotes, setMyVotes] = useState({}); 
   const [studentId] = useState(() => 'student_' + Math.random().toString(36).substring(2, 11));
+
+  // --- FULLSCREEN LIGHTBOX MODAL STATES ---
+  const [fullscreenMedia, setFullscreenMedia] = useState(null); // Holds the full item object when active
 
   // --- 1. REGISTER UNIQUE ANONYMOUS STUDENT PRESENCE ---
   useEffect(() => {
@@ -58,7 +61,6 @@ const FeedScreen = ({ pin, onBack }) => {
     setUploading(true);
     const cloudName = "dcnpa6whw"; 
     const uploadPreset = "suara_kami_preset"; 
-
     const data = new FormData();
 
     if (Platform.OS === 'web') {
@@ -74,7 +76,6 @@ const FeedScreen = ({ pin, onBack }) => {
     } else {
       const cleanUri = Platform.OS === 'android' ? fileUri : fileUri.replace('file://', '');
       const extension = fileUri.split('.').pop();
-
       data.append("file", {
         uri: cleanUri,
         type: fileType === 'image' ? `image/${extension}` : fileType === 'video' ? `video/${extension}` : 'application/pdf',
@@ -103,14 +104,12 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- 5. FIXED: CAMERA AND FILE PICKER LOGIC MATRIX ---
+  // --- 5. FILE SELECTION ACTION CONTROLLERS ---
   const handlePickMedia = async (mediaType, sourceAction) => {
     let result;
-
     if (mediaType === 'file') {
       result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
     } else {
-      // Check and request permissions depending on choice
       if (sourceAction === 'camera') {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) {
@@ -118,8 +117,6 @@ const FeedScreen = ({ pin, onBack }) => {
           else Alert.alert("Akses Ditolak", "Izin kamera diperlukan.");
           return;
         }
-        
-        // Launch live hardware camera snapshot/recording
         result = await ImagePicker.launchCameraAsync({
           mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
           quality: 0.4,
@@ -131,12 +128,9 @@ const FeedScreen = ({ pin, onBack }) => {
           else Alert.alert("Akses Ditolak", "Izin galeri diperlukan.");
           return;
         }
-
-        // Launch static media storage file picker selector
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
           quality: 0.4,
-          allowsEditing: true,
         });
       }
     }
@@ -157,18 +151,12 @@ const FeedScreen = ({ pin, onBack }) => {
     }
   };
 
-  // --- INTERACTIVE ACTION PROMPT CHOICE ---
   const triggerMediaPrompt = (mediaType) => {
     if (Platform.OS === 'web') {
-      // Web browser prompt framework workaround
       const choice = window.confirm("Klik 'OK' untuk Tangkap Terus Guna Kamera.\nKlik 'Cancel' untuk Pilih Fail sedia ada.");
-      if (choice) {
-        handlePickMedia(mediaType, 'camera');
-      } else {
-        handlePickMedia(mediaType, 'library');
-      }
+      if (choice) handlePickMedia(mediaType, 'camera');
+      else handlePickMedia(mediaType, 'library');
     } else {
-      // Mobile native alert choices menu sheet
       Alert.alert(
         "Muat Naik Lampiran",
         "Sila pilih kaedah input:",
@@ -184,7 +172,6 @@ const FeedScreen = ({ pin, onBack }) => {
   // --- 6. SPAM DEFIANT DOUBLE-VOTE CONSTRAINT CONTROL ---
   const handleVote = (postId) => {
     const currentVotesForPost = myVotes[postId] || 0;
-
     if (currentVotesForPost < 2) {
       update(ref(database, `rooms/${pin}/posts/${postId}`), { votes: increment(1) });
       setMyVotes({ ...myVotes, [postId]: currentVotesForPost + 1 });
@@ -222,22 +209,20 @@ const FeedScreen = ({ pin, onBack }) => {
         renderItem={({ item }) => (
           <View style={styles.postBubble}>
             
+            {/* Image Trigger Box */}
             {item.type === 'image' && (
-              <View style={styles.mediaContainer}>
+              <TouchableOpacity style={styles.mediaContainer} onPress={() => setFullscreenMedia(item)}>
                 <Image source={{ uri: item.content }} style={styles.mediaPreview} />
-              </View>
+                <View style={styles.zoomIndicator}><Text style={styles.zoomText}>🔍 Klik Skrin Penuh</Text></View>
+              </TouchableOpacity>
             )}
 
+            {/* Video Trigger Box */}
             {item.type === 'video' && (
-              <View style={styles.mediaContainer}>
-                <Video 
-                  source={{ uri: item.content }} 
-                  style={styles.videoPreview} 
-                  useNativeControls 
-                  resizeMode="contain" 
-                  shouldPlay={false}
-                />
-              </View>
+              <TouchableOpacity style={styles.mediaContainer} onPress={() => setFullscreenMedia(item)}>
+                <Video source={{ uri: item.content }} style={styles.videoPreview} resizeMode="contain" shouldPlay={false} />
+                <View style={styles.zoomIndicator}><Text style={styles.zoomText}>🔍 Klik Skrin Penuh</Text></View>
+              </TouchableOpacity>
             )}
 
             {item.type === 'file' && <Text style={styles.mediaLabel}>📄 Dokumen PDF Sedia Di Dashboard Pendidik</Text>}
@@ -257,11 +242,27 @@ const FeedScreen = ({ pin, onBack }) => {
         )}
       />
 
+      {/* --- DYNAMIC FULLSCREEN LIGHTBOX DISPLAY OVERLAY --- */}
+      <Modal visible={fullscreenMedia !== null} transparent={true} animationType="fade" onRequestClose={() => setFullscreenMedia(null)}>
+        <View style={styles.modalOverlayContainer}>
+          <TouchableOpacity style={styles.modalCloseButton} onPress={() => setFullscreenMedia(null)}>
+            <Text style={styles.modalCloseButtonText}>✕ TUTUP</Text>
+          </TouchableOpacity>
+          
+          {fullscreenMedia?.type === 'image' && (
+            <Image source={{ uri: fullscreenMedia.content }} style={styles.fullscreenMediaObject} resizeMode="contain" />
+          )}
+
+          {fullscreenMedia?.type === 'video' && (
+            <Video source={{ uri: fullscreenMedia.content }} style={styles.fullscreenMediaObject} useNativeControls resizeMode="contain" shouldPlay={true} />
+          )}
+        </View>
+      </Modal>
+
       {uploading && <ActivityIndicator size="large" color="#3498DB" style={{marginBottom: 10}} />}
 
       <View style={styles.inputContainerWrapper}>
         <View style={styles.inputBar}>
-          {/* Triggers the interactive choosing prompt menu */}
           <TouchableOpacity onPress={() => triggerMediaPrompt('image')}><Text style={styles.icon}>🖼️</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => triggerMediaPrompt('video')}><Text style={styles.icon}>🎥</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => handlePickMedia('file', 'document')}><Text style={styles.icon}>📂</Text></TouchableOpacity>
@@ -279,40 +280,12 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3498DB' },
   backBtn: { color: '#3498DB', fontWeight: 'bold', fontSize: 15 },
   listContent: { paddingBottom: 100 },
-  postBubble: { 
-    backgroundColor: '#FFF', 
-    padding: 15, 
-    borderRadius: 15, 
-    marginBottom: 15, 
-    elevation: 3,
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 600 
-  },
-  mediaContainer: {
-    width: '100%',
-    height: 300,
-    backgroundColor: '#000000', 
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 10,
-    position: 'relative', 
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  mediaPreview: { 
-    width: '100%', 
-    height: '100%', 
-    ...Platform.select({
-      web: { objectFit: 'contain' },
-      default: { resizeMode: 'contain' }
-    })
-  },
-  videoPreview: {
-    position: 'absolute',
-    top: 0, left: 0, bottom: 0, right: 0,
-    width: '100%', height: '100%',
-  },
+  postBubble: { backgroundColor: '#FFF', padding: 15, borderRadius: 15, marginBottom: 15, elevation: 3, alignSelf: 'center', width: '100%', maxWidth: 600 },
+  mediaContainer: { width: '100%', height: 300, backgroundColor: '#000', borderRadius: 12, overflow: 'hidden', marginBottom: 10, position: 'relative', justifyContent: 'center', alignItems: 'center', cursor: 'pointer' },
+  mediaPreview: { width: '100%', height: '100%', ...Platform.select({ web: { objectFit: 'contain' }, default: { resizeMode: 'contain' } }) },
+  videoPreview: { position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, width: '100%', height: '100%' },
+  zoomIndicator: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  zoomText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   mediaLabel: { color: '#3498DB', fontWeight: 'bold', fontSize: 12, marginBottom: 5 },
   postText: { fontSize: 16, color: '#333', marginTop: 5, lineHeight: 22 },
   voteBtn: { alignSelf: 'flex-end', backgroundColor: '#E3F2FD', padding: 8, borderRadius: 8, marginTop: 10, alignItems: 'center', minWidth: 110 },
@@ -323,7 +296,13 @@ const styles = StyleSheet.create({
   inputBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 30, padding: 10, elevation: 10, width: '100%', maxWidth: 600 },
   input: { flex: 1, height: 40, paddingHorizontal: 10 },
   icon: { fontSize: 22, marginHorizontal: 5 },
-  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10 }
+  sendIcon: { fontSize: 24, color: '#3498DB', marginLeft: 10 },
+  
+  // LIGHTBOX FRAME SYSTEMS
+  modalOverlayContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalCloseButton: { position: 'absolute', top: Platform.OS === 'web' ? 20 : 55, right: 25, backgroundColor: '#E74C3C', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, zIndex: 9999 },
+  modalCloseButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  fullscreenMediaObject: { width: '100%', height: '85%', maxWidth: 1000 }
 });
 
 export default FeedScreen;

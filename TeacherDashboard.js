@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, Linking, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, Linking, Alert, Platform, Modal } from 'react-native';
 import { database } from './firebaseConfig';
 import { ref, onValue, update, remove } from 'firebase/database';
 import { Video } from 'expo-av';
@@ -8,6 +8,9 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
   const [posts, setPosts] = useState([]);
   const [activeStudentsCount, setActiveStudentsCount] = useState(0);
 
+  // --- FULLSCREEN LIGHTBOX MODAL STATES ---
+  const [fullscreenMedia, setFullscreenMedia] = useState(null);
+
   // --- 1. LIVE POSTS LISTENER & SORTING ---
   useEffect(() => {
     const postsRef = ref(database, `rooms/${pin}/posts`);
@@ -15,7 +18,7 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
       const data = snapshot.val();
       if (data) {
         const postList = Object.keys(data).map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.votes - a.votes); // Automatically keeps highest voted posts at the top
+          .sort((a, b) => b.votes - a.votes);
         setPosts(postList);
       } else {
         setPosts([]);
@@ -31,7 +34,6 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
       if (data) {
         setActiveStudentsCount(Object.keys(data).length);
       } else {
-        // Fallback estimation based on unique activity metrics if node is empty
         setActiveStudentsCount(Math.max(1, Math.floor(posts.length * 0.7)));
       }
     });
@@ -40,7 +42,6 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
   // --- 3. CROSS-PLATFORM SESSION CLOSING LOGIC ---
   const handleCloseRoom = () => {
     const executeClose = () => {
-      // Calculate data distributions for our analytical charts
       const textCount = posts.filter(p => p.type === 'text').length;
       const mediaCount = posts.filter(p => p.type !== 'text').length;
 
@@ -53,16 +54,13 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
         chartData: { textCount, mediaCount, posts: posts.slice(0, 5) } 
       };
 
-      // Change room status in Firebase to instantly kick out connected students
       update(ref(database, `rooms/${pin}`), { status: 'Closed' });
       onSessionEnd(stats);
     };
 
     if (Platform.OS === 'web') {
       const confirmClose = window.confirm("Tamatkan Sesi?\nAnalitik akan dijana untuk rekod anda.");
-      if (confirmClose) {
-        executeClose();
-      }
+      if (confirmClose) executeClose();
     } else {
       Alert.alert(
         "Tamatkan Sesi?",
@@ -77,7 +75,6 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
 
   return (
     <View style={styles.container}>
-      {/* Top Header Information Panel */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}><Text style={styles.menuBtn}>← Menu</Text></TouchableOpacity>
         <Text style={styles.pinText}>PIN: {pin}</Text>
@@ -87,7 +84,6 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
         </View>
       </View>
 
-      {/* Moderation Stream */}
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id}
@@ -95,27 +91,22 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
         renderItem={({ item }) => (
           <View style={styles.card}>
             
-            {/* Image Attachments */}
+            {/* Image Trigger Box */}
             {item.type === 'image' && (
-              <View style={styles.mediaContainer}>
+              <TouchableOpacity style={styles.mediaContainer} onPress={() => setFullscreenMedia(item)}>
                 <Image source={{ uri: item.content }} style={styles.mediaPreview} />
-              </View>
+                <View style={styles.zoomIndicator}><Text style={styles.zoomText}>🔍 Klik Skrin Penuh</Text></View>
+              </TouchableOpacity>
             )}
             
-            {/* FIXED & AUTORESIZING BACKDROP VIDEO ENGINE */}
+            {/* Video Trigger Box */}
             {item.type === 'video' && (
-              <View style={styles.mediaContainer}>
-                <Video 
-                  source={{ uri: item.content }} 
-                  style={styles.videoPreview} 
-                  useNativeControls 
-                  resizeMode="contain" // Guarantees player handles bounds dynamically without clipping
-                  shouldPlay={false}
-                />
-              </View>
+              <TouchableOpacity style={styles.mediaContainer} onPress={() => setFullscreenMedia(item)}>
+                <Video source={{ uri: item.content }} style={styles.videoPreview} resizeMode="contain" shouldPlay={false} />
+                <View style={styles.zoomIndicator}><Text style={styles.zoomText}>🔍 Klik Skrin Penuh</Text></View>
+              </TouchableOpacity>
             )}
             
-            {/* PDF Attachments */}
             {item.type === 'file' && (
               <TouchableOpacity style={styles.pdfBtn} onPress={() => Linking.openURL(item.content)}>
                 <Text style={styles.pdfText}>📄 BUKA DOKUMEN PDF</Text>
@@ -134,6 +125,23 @@ const TeacherDashboard = ({ pin, subject, onSessionEnd, onBack }) => {
         )}
       />
 
+      {/* --- DYNAMIC FULLSCREEN LIGHTBOX DISPLAY OVERLAY --- */}
+      <Modal visible={fullscreenMedia !== null} transparent={true} animationType="fade" onRequestClose={() => setFullscreenMedia(null)}>
+        <View style={styles.modalOverlayContainer}>
+          <TouchableOpacity style={styles.modalCloseButton} onPress={() => setFullscreenMedia(null)}>
+            <Text style={styles.modalCloseButtonText}>✕ TUTUP</Text>
+          </TouchableOpacity>
+          
+          {fullscreenMedia?.type === 'image' && (
+            <Image source={{ uri: fullscreenMedia.content }} style={styles.fullscreenMediaObject} resizeMode="contain" />
+          )}
+
+          {fullscreenMedia?.type === 'video' && (
+            <Video source={{ uri: fullscreenMedia.content }} style={styles.fullscreenMediaObject} useNativeControls resizeMode="contain" shouldPlay={true} />
+          )}
+        </View>
+      </Modal>
+
       <TouchableOpacity style={styles.endBtn} onPress={handleCloseRoom}>
         <Text style={styles.endText}>TAMATKAN SESI & ANALITIK</Text>
       </TouchableOpacity>
@@ -150,49 +158,12 @@ const styles = StyleSheet.create({
   studentBadge: { backgroundColor: '#1ABC9C', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, marginTop: 5 },
   studentBadgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   listContent: { paddingBottom: 30 },
-  
-  card: { 
-    backgroundColor: '#1E1E1E', 
-    padding: 15, 
-    borderRadius: 12, 
-    marginBottom: 15, 
-    borderLeftWidth: 4, 
-    borderLeftColor: '#3498DB',
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 600 // Keeps cards looking structured on wide desktop monitors
-  },
-
-  // FIXED OVERFLOW MEDIA backings
-  mediaContainer: {
-    width: '100%',
-    height: 240,
-    backgroundColor: '#000000', // Black borders drop in seamlessly for different proportions
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 10,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  mediaPreview: { 
-    width: '100%', 
-    height: '100%', 
-    ...Platform.select({
-      web: { objectFit: 'contain' },
-      default: { resizeMode: 'contain' }
-    })
-  },
-  videoPreview: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    right: 0,
-    width: '100%',
-    height: '100%',
-  },
-
+  card: { backgroundColor: '#1E1E1E', padding: 15, borderRadius: 12, marginBottom: 15, borderLeftWidth: 4, borderLeftColor: '#3498DB', alignSelf: 'center', width: '100%', maxWidth: 600 },
+  mediaContainer: { width: '100%', height: 240, backgroundColor: '#000', borderRadius: 8, overflow: 'hidden', marginBottom: 10, position: 'relative', justifyContent: 'center', alignItems: 'center', cursor: 'pointer' },
+  mediaPreview: { width: '100%', height: '100%', ...Platform.select({ web: { objectFit: 'contain' }, default: { resizeMode: 'contain' } }) },
+  videoPreview: { position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, width: '100%', height: '100%' },
+  zoomIndicator: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  zoomText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   pdfBtn: { backgroundColor: '#333', padding: 15, borderRadius: 8, marginBottom: 10, alignItems: 'center' },
   pdfText: { color: '#F1C40F', fontWeight: 'bold' },
   mainText: { color: '#FFF', fontSize: 18, marginBottom: 10 },
@@ -200,7 +171,13 @@ const styles = StyleSheet.create({
   voteCount: { color: '#3498DB', fontWeight: 'bold' },
   deleteBtn: { color: '#E74C3C', fontWeight: 'bold' },
   endBtn: { backgroundColor: '#E74C3C', padding: 18, borderRadius: 12, alignItems: 'center', alignSelf: 'center', width: '100%', maxWidth: 600, marginBottom: 20 },
-  endText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
+  endText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  // LIGHTBOX FRAME SYSTEMS
+  modalOverlayContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalCloseButton: { position: 'absolute', top: Platform.OS === 'web' ? 20 : 55, right: 25, backgroundColor: '#E74C3C', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, zIndex: 9999 },
+  modalCloseButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  fullscreenMediaObject: { width: '100%', height: '85%', maxWidth: 1000 }
 });
 
 export default TeacherDashboard;
